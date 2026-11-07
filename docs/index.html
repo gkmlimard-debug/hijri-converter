@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>محول التاريخ</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;background:#071223;color:#f8fafc;font-family:Arial,"Noto Sans Arabic",sans-serif;color-scheme:dark}
+body{min-height:100vh}
+.app{max-width:420px;margin:0 auto;padding:28px 15px 20px}
+h1{font-size:21px;text-align:center;margin:0 0 18px}
+.direction{display:grid;grid-template-columns:1fr 50px 1fr;gap:9px;align-items:end;margin-bottom:14px}
+.label{text-align:center;color:#cbd5e1;font-size:12px;margin-bottom:6px}
+.type-card{display:flex;width:100%;height:46px;align-items:center;justify-content:center;border:1px solid #334a66;border-radius:11px;background:#0b1d34;color:#fff;font-size:15px;font-weight:700}
+.swap-btn{width:50px;height:50px;padding:0;border:1px solid #35516e;border-radius:14px;background:#0c223a;color:#38bdf8;font-size:20px;cursor:pointer}
+.swap-btn:active{transform:scale(.95)}
+.date-row{display:grid;grid-template-columns:1.2fr .85fr .85fr;gap:7px;margin-bottom:11px}
+.date-row input{min-width:0;width:100%;height:48px;border:1px solid #334a66;border-radius:10px;background:#091a30;color:#fff;text-align:center;font-size:17px;outline:none}
+.date-row input::placeholder{color:#7f93aa;font-size:12px}
+.date-row input:focus{border-color:#38bdf8}
+.error{background:#2a1620;border:1px solid #6d3348;color:#fecdd3;border-radius:9px;padding:9px 10px;font-size:12px;margin-bottom:10px}
+.convert-btn{width:100%;height:48px;border:0;border-radius:11px;background:#0ea5e9;color:#fff;font-size:16px;font-weight:700;cursor:pointer}
+.result{margin-top:12px;padding:12px;border:1px solid #334a66;border-radius:12px;background:#0b1d34;text-align:center}
+.result-title{font-size:12px;color:#cbd5e1;margin-bottom:7px}
+.result-date{font-size:25px;font-weight:800;letter-spacing:.5px;direction:ltr;margin-bottom:10px}
+.copy-btn{width:100%;height:40px;border:1px solid #31506d;border-radius:9px;background:#102942;color:#e0f2fe;font-size:14px;font-weight:700;cursor:pointer}
+#toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#0ea5e9;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .25s}
+#toast.show{opacity:1}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main class="app">
+  <h1>محول التاريخ</h1>
+  <section class="direction">
+    <div><div class="label">من</div><div id="fromType" class="type-card">ميلادي</div></div>
+    <button id="swap" class="swap-btn" type="button" aria-label="قلب الاتجاه">⇄</button>
+    <div><div class="label">إلى</div><div id="toType" class="type-card">هجري</div></div>
+  </section>
+  <section class="date-row" dir="ltr">
+    <input id="year" type="text" inputmode="numeric" maxlength="4" placeholder="السنة" autocomplete="off" aria-label="السنة">
+    <input id="month" type="text" inputmode="numeric" maxlength="2" placeholder="الشهر" autocomplete="off" aria-label="الشهر">
+    <input id="day" type="text" inputmode="numeric" maxlength="2" placeholder="اليوم" autocomplete="off" aria-label="اليوم">
+  </section>
+  <div id="error" class="error" role="alert" hidden></div>
+  <button id="convert" class="convert-btn" type="button">تحويل ونسخ</button>
+  <section id="result" class="result" hidden>
+    <div class="result-title">التاريخ بعد التحويل</div>
+    <div id="resultDate" class="result-date"></div>
+    <button id="copyAgain" class="copy-btn" type="button">نسخ مرة أخرى</button>
+  </section>
+</main>
+<div id="toast">تم نسخ التاريخ المحوّل</div>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const fromType = $("fromType"), toType = $("toType"), swap = $("swap");
+  const year = $("year"), month = $("month"), day = $("day");
+  const convert = $("convert"), error = $("error"), result = $("result");
+  const resultDate = $("resultDate"), copyAgain = $("copyAgain"), toast = $("toast");
+  const inputs = [year, month, day];
+  let from = "Gregorian", to = "Hijri", tt;
+
+  const fmt = new Intl.DateTimeFormat("en-US-u-ca-islamic-umalqura",
+    { timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit" });
+
+  function hijriParts(date) {
+    const out = {};
+    for (const p of fmt.formatToParts(date))
+      if (p.type === "year" || p.type === "month" || p.type === "day") out[p.type] = Number(p.value);
+    return out;
+  }
+  const pad = (n) => String(n).padStart(2, "0");
+
+  function setError(msg) {
+    error.textContent = msg;
+    error.hidden = !msg;
+    if (msg) result.hidden = true;
+  }
+
+  inputs.forEach((el, i) => {
+    el.addEventListener("input", () => {
+      el.value = el.value.replace(/\D/g, "");
+      if (el.value.length === el.maxLength && i < 2) inputs[i + 1].focus();
+    });
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Backspace" && el.value === "" && i > 0) {
+        e.preventDefault();
+        inputs[i - 1].focus();
+      }
+    });
+  });
+
+  function updateLabels() {
+    fromType.textContent = from === "Gregorian" ? "ميلادي" : "هجري";
+    toType.textContent = to === "Gregorian" ? "ميلادي" : "هجري";
+  }
+
+  swap.addEventListener("click", () => {
+    [from, to] = [to, from];
+    updateLabels();
+    setError("");
+    result.hidden = true;
+  });
+
+  function gregorianToHijri(y, m, d) {
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    if (y < 100 || dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d)
+      throw new Error("تاريخ ميلادي غير صحيح.");
+    const h = hijriParts(dt);
+    if (!h.year || !h.month || !h.day) throw new Error("تاريخ ميلادي غير صحيح.");
+    return h.year + "/" + pad(h.month) + "/" + pad(h.day);
+  }
+
+  function hijriToGregorian(y, m, d) {
+    const bad = "تاريخ هجري غير صحيح أو خارج نطاق تقويم أم القرى.";
+    if (y < 1300 || y > 1600 || m < 1 || m > 12 || d < 1 || d > 30) throw new Error(bad);
+    const ay = Math.floor(y * 0.970224) + 622;
+    const start = Date.UTC(ay - 2, 0, 1), end = Date.UTC(ay + 2, 11, 31);
+    for (let t = start; t <= end; t += 86400000) {
+      const h = hijriParts(new Date(t));
+      if (h.year === y && h.month === m && h.day === d) {
+        const g = new Date(t);
+        return g.getUTCFullYear() + "/" + pad(g.getUTCMonth() + 1) + "/" + pad(g.getUTCDate());
+      }
+    }
+    throw new Error(bad);
+  }
+
+  async function copyText(text) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {}
+    if (!ok) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.cssText = "position:fixed;left:-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand("copy");
+        ta.remove();
+      } catch (e) {}
+    }
+    if (ok) {
+      toast.classList.add("show");
+      clearTimeout(tt);
+      tt = setTimeout(() => toast.classList.remove("show"), 1800);
+    }
+  }
+
+  async function doConvert() {
+    setError("");
+    result.hidden = true;
+    try {
+      if (!year.value || !month.value || !day.value) throw new Error("أدخل السنة والشهر واليوم.");
+      const y = Number(year.value), m = Number(month.value), d = Number(day.value);
+      const out = from === "Gregorian" ? gregorianToHijri(y, m, d) : hijriToGregorian(y, m, d);
+      resultDate.textContent = out;
+      result.hidden = false;
+      await copyText(out);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "حدث خطأ غير متوقع.");
+    }
+  }
+
+  convert.addEventListener("click", doConvert);
+  copyAgain.addEventListener("click", () => {
+    if (resultDate.textContent) copyText(resultDate.textContent);
+  });
+
+  updateLabels();
+  year.focus();
+})();
+</script>
+</body>
+</html>
